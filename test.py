@@ -1,5 +1,6 @@
 import logging
 import cv2 as cv
+from torch import classes
 from ultralytics import YOLO
 from scan_ip_port import scan_ip_port
 
@@ -13,8 +14,9 @@ def find_network_cam(username: str, password: str) -> cv.VideoCapture:
 
 
 logging.getLogger("ultralytics").setLevel(logging.WARNING)
-model = YOLO("yolov10x.pt")
+model = YOLO("yolov10n.pt")
 cap = find_network_cam(username='admin', password='admin')
+target_classes = [0, 60]
 
 if __name__ == '__main__':
     if not cap.isOpened():
@@ -27,7 +29,7 @@ if __name__ == '__main__':
             print('Error: Unable to read frame from stream')
             break
 
-        results = model.predict(frame)
+        results = model.predict(frame, classes=target_classes)
         annot_frame = results[0].plot()
         cv.imshow('YOLOv10-N Detection', annot_frame)
 
