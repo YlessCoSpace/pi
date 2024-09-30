@@ -15,23 +15,18 @@ def find_network_cam(username: str, password: str) -> cv.VideoCapture:
 
 logging.getLogger("ultralytics").setLevel(logging.WARNING)
 model = YOLO("yolo11n.pt")
-cap = find_network_cam(username='admin', password='admin')
+
 # target_classes = [0, 60]
 
 if __name__ == '__main__':
+    try:
+        cap = find_network_cam(username='admin', password='admin')
+    except FileNotFoundError:
+        print(f'Error: No video stream available in the network')
+        exit()
+
     if not cap.isOpened():
         print(f'Error: Unable to open video stream')
         exit()
 
-    while True:
-        ret, frame = cap.read()
-        if not ret:
-            print('Error: Unable to read frame from stream')
-            break
 
-        results = model.predict(frame)
-        annot_frame = results[0].plot()
-        cv.imshow('Detection', annot_frame)
-
-        if cv.waitKey(1) & 0xFF == ord('q'):
-            break
