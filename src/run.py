@@ -28,5 +28,3 @@ if __name__ == '__main__':
     if not cap.isOpened():
         print(f'Error: Unable to open video stream')
         exit()
-
-

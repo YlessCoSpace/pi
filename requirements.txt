@@ -2,3 +2,4 @@ opencv-python
 ultralytics
 netifaces
 dill
+numpy
