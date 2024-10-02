@@ -2,6 +2,7 @@ import cv2
 import numpy as np
 from ultralytics import YOLO
 
+# todo: tracking model required????????
 
 def detect_room_floor(image):
     # todo: NOT WORKING
@@ -18,10 +19,10 @@ def detect_room_floor(image):
 
 
 def get_objects(image, model: YOLO):
-    results = model.predict(image)
+    results = model.predict(image)[0]
     ret = {}
 
-    for det in results[0].boxes:
+    for det in results.boxes:
         x1, y1, x2, y2 = det.xyxy[0].float().tolist()
         conf = det.conf.item()
         cls = det.cls.item()
@@ -31,7 +32,7 @@ def get_objects(image, model: YOLO):
             ret[cls_name] = []
         ret[cls_name].append(((x1, y1, x2, y2), conf))
 
-    return ret
+    return ret, results
 
 
 def draw_bb(image, points):
@@ -40,15 +41,24 @@ def draw_bb(image, points):
 
 
 if __name__ == '__main__':
-    img = cv2.imread('../image/classroom.jpg')
-    img = cv2.resize(img, (0, 0), fx=0.25, fy=0.25)
+    IM_PATH = '../videos/out/ffmpeg_1.bmp'
+    MODEL = YOLO('yolo11n.pt')
+    # print(model)
+    img = cv2.imread(IM_PATH)
+    # img = cv2.resize(img, (0, 0), fx=2, fy=2)
 
-    points = detect_room_floor(img)
-    print(points)
+    # points = detect_room_floor(img)
+    # print(points)
+    #
+    # img = draw_bb(img, points)
+    #
+    # cv2.imshow("Output", img)
+    # if cv2.waitKey(0) & 0xFF == ord('q'):
+    #     cv2.destroyAllWindows()
 
-    img = draw_bb(img, points)
-
-    cv2.imshow("Output", img)
-    if cv2.waitKey(0) & 0xFF == ord('q'):
-        cv2.destroyAllWindows()
-    # res = get_objects('../image/classroom.jpg', YOLO('yolo11n.pt'))
+    res, results = get_objects(img, MODEL)
+    for k in res:
+        print(f'Class: {k}')
+        for instance in res[k]:
+            print(f'    {instance}')
+    results.show()

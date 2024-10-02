@@ -1,22 +1,11 @@
 import logging
-import cv2 as cv
-from torch import classes
+import cv2
 from ultralytics import YOLO
-from scan_ip_port import scan_ip_port
-
-
-def find_network_cam(username: str, password: str) -> cv.VideoCapture:
-    cam_ip = scan_ip_port(8554, max_workers=255)
-    if cam_ip:
-        return cv.VideoCapture(f'rtsp://{username}:{password}@{cam_ip[0]}:8554/live')
-    else:
-        raise FileNotFoundError('No video devices on the network')
-
+from lib_find_network_cam import find_network_cam
 
 logging.getLogger("ultralytics").setLevel(logging.WARNING)
 model = YOLO("yolo11n.pt")
 cap = find_network_cam(username='admin', password='admin')
-# target_classes = [0, 60]
 
 if __name__ == '__main__':
     if not cap.isOpened():
@@ -31,7 +20,7 @@ if __name__ == '__main__':
 
         results = model.predict(frame)
         annot_frame = results[0].plot()
-        cv.imshow('Detection', annot_frame)
+        cv2.imshow('Detection', annot_frame)
 
-        if cv.waitKey(1) & 0xFF == ord('q'):
+        if cv2.waitKey(1) & 0xFF == ord('q'):
             break
