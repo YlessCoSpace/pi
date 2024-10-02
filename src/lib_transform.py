@@ -1,5 +1,8 @@
 import numpy as np
 import cv2
+import pickle
+
+from sympy.codegen.ast import float32
 
 
 def tup_int(tup: tuple):
@@ -39,13 +42,40 @@ def perspective_tf_image(image, mat, dsize):
 def perspective_tf_points(points, mat):
     _points = np.array(points, dtype=np.float32)
     _points = np.array([_points])
-    return cv2.perspectiveTransform(_points, mat)
+    return cv2.perspectiveTransform(_points, mat)[0]
+
+
+def draw_bb(image, bbox, color=(0, 255, 0), thickness=2):
+    x, y, w, h = bbox
+    top_left = (x, y)
+    bottom_right = (x + w, y + h)
+    image_with_box = cv2.rectangle(image, top_left, bottom_right, color, thickness)
+    return image_with_box
+
+
+def draw_poly(image, points, color=(0, 255, 0), thickness=2):
+    pts = np.array(points, dtype=int).reshape((-1, 1, 2))
+    return cv2.polylines(image, [pts], isClosed=True, color=color, thickness=thickness)
+
+
+def save_mat(obj, filename: str):
+    with open(filename, mode='wb') as f:
+        pickle.dump(obj, f)
+
+
+def load_mat(filename: str):
+    with open(filename, mode='rb') as f:
+        return pickle.load(f)
 
 
 __all__ = [
+    'save_mat',
+    'load_mat',
     'tup_int',
     'line_intersection',
     'get_perspective_tf_mat',
     'perspective_tf_image',
-    'perspective_tf_points'
+    'perspective_tf_points',
+    'draw_bb',
+    'draw_poly'
 ]
