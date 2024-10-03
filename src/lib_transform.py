@@ -26,6 +26,17 @@ def line_intersection(p1, p2, p3, p4):
     return x_i, y_i
 
 
+def y_intercept(p1, p2):
+    x1, y1 = p1
+    x2, y2 = p2
+
+    return y1 - x1 * (y2 - y1) / (x2 - x1)
+
+
+def pad_image(image, t, b, l, r):
+    return cv2.copyMakeBorder(image, t, b, l, r, cv2.BORDER_CONSTANT, value=(0, 0, 0))
+
+
 def get_perspective_tf_mat(tl, tr, br, bl, dsize):
     w, h = dsize
 
@@ -68,14 +79,102 @@ def load_mat(filename: str):
         return pickle.load(f)
 
 
+def iou(box1, box2):
+    x1, y1, x2, y2 = box1
+    x1_, y1_, x2_, y2_ = box2
+
+    xi1 = max(x1, x1_)
+    yi1 = max(y1, y1_)
+    xi2 = min(x2, x2_)
+    yi2 = min(y2, y2_)
+
+    inter_width = max(0, xi2 - xi1)
+    inter_height = max(0, yi2 - yi1)
+    inter_area = inter_width * inter_height
+
+    box1_area = (x2 - x1) * (y2 - y1)
+    box2_area = (x2_ - x1_) * (y2_ - y1_)
+
+    union_area = box1_area + box2_area - inter_area
+
+    return inter_area / union_area if union_area != 0 else 0
+
+
+def coverage(box1, box2):
+    x1, y1, x2, y2 = box1
+    x1_, y1_, x2_, y2_ = box2
+
+    if x1_ >= x1 and y1_ >= y1 and x2_ <= x2 and y2_ <= y2:
+        return True
+
+    xi1 = max(x1, x1_)
+    yi1 = max(y1, y1_)
+    xi2 = min(x2, x2_)
+    yi2 = min(y2, y2_)
+
+    inter_width = max(0, xi2 - xi1)
+    inter_height = max(0, yi2 - yi1)
+    inter_area = inter_width * inter_height
+
+    box2_area = (x2_ - x1_) * (y2_ - y1_)
+
+    return inter_area / box2_area
+
+
+def merge_boxes(box1, box2):
+    x1, y1, x2, y2 = box1
+    x1_, y1_, x2_, y2_ = box2
+
+    merged_x1 = min(x1, x1_)
+    merged_y1 = min(y1, y1_)
+    merged_x2 = max(x2, x2_)
+    merged_y2 = max(y2, y2_)
+
+    return [merged_x1, merged_y1, merged_x2, merged_y2]
+
+
+def merge_overlapped(bboxes, threshold=0.8):
+    merged_boxes = []
+
+    bboxes = sorted(bboxes, key=lambda x: (x['pos1'][0], x['pos1'][1]))
+
+    while bboxes:
+        box = bboxes.pop(0)
+        bbox = (*box['pos1'], *box['pos2'])
+        merged = False
+
+        for i, merged_box in enumerate(merged_boxes):
+            mbox = (*merged_box['pos1'], *merged_box['pos2'])
+            if (coverage(mbox, bbox) > threshold
+                    or coverage(bbox, mbox) > threshold):
+                obox = merge_boxes(bbox, mbox)
+                merged_boxes[i] = {
+                    **{k: box[k] for k in box},
+                    'pos1': tuple(obox[0:2]),
+                    'pos2': tuple(obox[2:4]),
+                }
+                merged = True
+                break
+
+        if not merged:
+            merged_boxes.append(box)
+
+    return merged_boxes
+
+
 __all__ = [
     'save_mat',
     'load_mat',
     'tup_int',
+    'pad_image',
     'line_intersection',
     'get_perspective_tf_mat',
     'perspective_tf_image',
     'perspective_tf_points',
     'draw_bb',
-    'draw_poly'
+    'draw_poly',
+    'iou',
+    'coverage',
+    'merge_boxes',
+    'merge_overlapped'
 ]
