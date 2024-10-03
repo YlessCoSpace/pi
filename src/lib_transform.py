@@ -2,7 +2,32 @@ import numpy as np
 import cv2
 import pickle
 
-from sympy.codegen.ast import float32
+from typing import TypedDict
+
+EntityEntry = TypedDict('EntityEntry', {
+    'conf': float,
+    'pos1': tuple[float, float],
+    'pos2': tuple[float, float]
+})
+
+SubEntityTransformed = TypedDict('SubEntityTransformed', {
+    'tl': tuple[float, float],
+    'tr': tuple[float, float],
+    'bl': tuple[float, float],
+    'br': tuple[float, float],
+})
+
+EntityTransformed = TypedDict('EntityTransformed', {
+    'all': SubEntityTransformed,
+    'real': SubEntityTransformed,
+})
+
+TableEntry = TypedDict('TableEntry', {
+    'x': float,
+    'y': float,
+    'people': list[tuple[float, float]],
+    'items': list[tuple[float, float]]
+})
 
 
 def tup_int(tup: tuple):
@@ -162,6 +187,28 @@ def merge_overlapped(bboxes, threshold=0.8):
     return merged_boxes
 
 
+def euclidean_distance(p1, p2):
+    return ((p1[0] - p2[0]) ** 2 + (p1[1] - p2[1]) ** 2) ** 0.5
+
+
+def clamp_normalize(tup):
+    x = max(0, min(1, tup[0]))
+    y = max(0, min(1, tup[1]))
+    return x, y
+
+
+def scale_tup(tup, scale_x, scale_y):
+    return tup[0] * scale_x, tup[1] * scale_y
+
+def offset_tup(tup, offset_x, offset_y):
+    return tup[0] + offset_x, tup[1] + offset_y
+
+def add_tup(tup1, tup2):
+    return tup1[0] + tup2[0], tup1[1] + tup2[1]
+
+def p_center(tl, tr, bl, br):
+    return line_intersection(tl, br, bl, tr)
+
 __all__ = [
     'save_mat',
     'load_mat',
@@ -176,5 +223,14 @@ __all__ = [
     'iou',
     'coverage',
     'merge_boxes',
-    'merge_overlapped'
+    'merge_overlapped',
+    'EntityEntry',
+    'EntityTransformed',
+    'TableEntry',
+    'euclidean_distance',
+    'clamp_normalize',
+    'scale_tup',
+    'offset_tup',
+    'add_tup',
+    'p_center'
 ]

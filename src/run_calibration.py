@@ -1,7 +1,4 @@
-import pickle
-
 import cv2
-import numpy as np
 from lib_find_network_cam import find_network_cam
 from lib_transform import *
 
@@ -60,8 +57,7 @@ if __name__ == '__main__':
                 mat = get_perspective_tf_mat(_tl, _tr, _br, _bl, (ow, oh))
                 _tf = perspective_tf_image(frame, mat, (ow, oh))
 
-                with open('perspective_matrix.pkl', 'wb') as f:
-                    pickle.dump(mat, f)
+                save_mat(mat, 'perspective_matrix.pkl')
 
                 cv2.imshow('Image', frame)
                 stopped = True

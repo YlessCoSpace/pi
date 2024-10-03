@@ -1,8 +1,5 @@
-import pickle
-
 import cv2
-import numpy as np
-from lib_transform import *
+from src.lib_transform import *
 
 
 def cb_click(_event, _x, _y, _flags, _param):
@@ -12,7 +9,7 @@ def cb_click(_event, _x, _y, _flags, _param):
     points.append((_x, _y))
 
 
-image = cv2.imread('videos/out/ffmpeg_1.bmp')
+image = cv2.imread('videos/out/ffmpeg_37.bmp')
 
 if __name__ == '__main__':
     cv2.namedWindow('Image')

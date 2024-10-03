@@ -1,10 +1,8 @@
-import pprint
-
 import cv2
 import numpy as np
 from ultralytics import YOLO
-from lib_transform import *
 from src.lib_transform import *
+from src.lib_transform import scale_tup
 
 # https://gist.github.com/rcland12/dc48e1963268ff98c8b2c4543e7a9be8
 ITEM_CLASSES = [
@@ -18,7 +16,7 @@ TABLE_CLASS = 60
 COLORS = [(0, 0, 255), (0, 255, 0), (255, 0, 0), (0, 255, 255), (255, 0, 255)]
 
 
-def two_stage_det(image, model: YOLO):
+def two_stage_det(image, model: YOLO) -> dict[str, list[EntityEntry]]:
     def _to_result(__results):
         __ret = {}
         for __res in __results:
@@ -59,7 +57,7 @@ def two_stage_det(image, model: YOLO):
                 _ret[k] = []
             _ret[k].extend(_ir[k])
 
-    _out = {
+    _out: dict[str, list[EntityEntry]] = {
         'dining table': _ret['dining table'],
         'person': _ret['person'],
         'items': []
@@ -75,8 +73,146 @@ def two_stage_det(image, model: YOLO):
     return _out
 
 
+def transform_normalize_sort(data: dict[str, list[EntityEntry]], mat) -> dict[str, list[EntityTransformed]]:
+    _out: dict[str, list[EntityTransformed]] = {}
+
+    _min_x, _min_y = float('inf'), float('inf')
+    _max_x, _max_y = float('-inf'), float('-inf')
+
+    _loc_min_x, _loc_min_y = float('inf'), float('inf')
+    _loc_max_x, _loc_max_y = float('-inf'), float('-inf')
+
+    for c in data:
+        for instance in data[c]:
+            # Pos
+            x1, y1 = w * instance['pos1'][0], h * instance['pos1'][1]
+            x2, y2 = w * instance['pos2'][0], h * instance['pos2'][1]
+
+            # Warp transform
+            tl = tuple(perspective_tf_points([(x1, y1)], mat)[0])
+            tr = tuple(perspective_tf_points([(x2, y1)], mat)[0])
+            bl = tuple(perspective_tf_points([(x1, y2)], mat)[0])
+            br = tuple(perspective_tf_points([(x2, y2)], mat)[0])
+
+            # To normalize
+            _min_x = min(_min_x, tl[0], tr[0], bl[0], br[0])
+            _max_x = max(_max_x, tl[0], tr[0], bl[0], br[0])
+            _min_y = min(_min_y, tl[1], tr[1], bl[1], br[1])
+            _max_y = max(_max_x, tl[1], tr[1], bl[1], br[1])
+
+            _loc_min_x = min(_loc_min_x, (bl[0] + br[0]) / 2)
+            _loc_max_x = max(_loc_max_x, (bl[0] + br[0]) / 2)
+            _loc_min_y = min(_loc_min_y, (bl[1] + br[1]) / 2)
+            _loc_max_y = max(_loc_max_x, (bl[1] + br[1]) / 2)
+
+            if c not in _out:
+                _out[c] = []
+            _out[c].append({
+                'all': {'tl': tl, 'tr': tr, 'bl': bl, 'br': br},
+                'real': {'tl': tl, 'tr': tr, 'bl': bl, 'br': br}
+            })
+
+    _wx = _max_x - _min_x
+    _wy = _max_y - _min_y
+
+    _loc_wx = _loc_max_x - _loc_min_x
+    _loc_wy = _loc_max_y - _loc_min_y
+
+    for c in _out:
+        for j, instance in enumerate(_out[c]):
+            tl = scale_tup(offset_tup(instance['all']['tl'], -_min_x, -_min_y), 1 / _wx, 1 / _wy)
+            tr = scale_tup(offset_tup(instance['all']['tr'], -_min_x, -_min_y), 1 / _wx, 1 / _wy)
+            bl = scale_tup(offset_tup(instance['all']['bl'], -_min_x, -_min_y), 1 / _wx, 1 / _wy)
+            br = scale_tup(offset_tup(instance['all']['br'], -_min_x, -_min_y), 1 / _wx, 1 / _wy)
+
+            _out[c][j]['all'] = {
+                'tl': clamp_normalize(tl),
+                'tr': clamp_normalize(tr),
+                'bl': clamp_normalize(bl),
+                'br': clamp_normalize(br),
+            }
+
+            tl = scale_tup(offset_tup(instance['real']['tl'], -_loc_min_x, -_loc_min_y), 1 / _loc_wx, 1 / _loc_wy)
+            tr = scale_tup(offset_tup(instance['real']['tr'], -_loc_min_x, -_loc_min_y), 1 / _loc_wx, 1 / _loc_wy)
+            bl = scale_tup(offset_tup(instance['real']['bl'], -_loc_min_x, -_loc_min_y), 1 / _loc_wx, 1 / _loc_wy)
+            br = scale_tup(offset_tup(instance['real']['br'], -_loc_min_x, -_loc_min_y), 1 / _loc_wx, 1 / _loc_wy)
+
+            _out[c][j]['real'] = {
+                'tl': clamp_normalize(tl),
+                'tr': clamp_normalize(tr),
+                'bl': clamp_normalize(bl),
+                'br': clamp_normalize(br),
+            }
+        _out[c].sort(
+            key=lambda x: p_center(x['real']['tl'], x['real']['tr'], x['real']['bl'], x['real']['br'])
+        )
+
+    return _out
+
+
+def assign_to_table(data: dict[str, list[EntityTransformed]]):
+    _tables = data['dining table']
+    _people = data['person']
+    _items = data['items']
+
+    _out: dict[int, TableEntry] = {}
+
+    for index, table in enumerate(_tables):
+        try:
+            _cen = p_center(**table['real'])
+            tup_int(_cen)
+            _out[index] = {
+                'x': _cen[0],
+                'y': _cen[1],
+                'people': [],
+                'items': []
+            }
+        except OverflowError:
+            pass
+
+    table_pos = [p_center(**table['real']) for table in _tables]
+
+    # Compare center bottom of people vs table
+    for index_person, person in enumerate(_people):
+        p1 = p_center(**person['real'])
+        min_dist = float('inf')
+        min_idx = None
+        for index, table in enumerate(_tables):
+            p2 = table_pos[index]
+            d = euclidean_distance(p1, p2)
+            if d < min_dist:
+                min_dist = d
+                min_idx = index
+        if min_idx in _out:
+            try:
+                tup_int((p1[0], p1[1]))
+                _out[min_idx]['people'].append(p1)
+            except OverflowError:
+                pass
+    for index_item, item in enumerate(_items):
+        p1 = p_center(**item['real'])
+        min_dist = float('inf')
+        min_idx = None
+        for index, table in enumerate(_tables):
+            p2 = table_pos[index]
+            d = euclidean_distance(p1, p2)
+            if d < min_dist:
+                min_dist = d
+                min_idx = index
+        if min_idx in _out:
+            try:
+                tup_int((p1[0], p1[1]))
+                _out[min_idx]['items'].append(p1)
+            except OverflowError:
+                pass
+
+    return _out
+
+
 if __name__ == '__main__':
-    IM_PATH = 'videos/out/ffmpeg_1.bmp'
+    from pprint import pprint
+
+    IM_PATH = 'videos/out/ffmpeg_37.bmp'
     MODEL = YOLO('yolo11n.pt')
 
     mat = load_mat('perspective_matrix.pkl')
@@ -84,22 +220,40 @@ if __name__ == '__main__':
     h, w = img.shape[:2]
 
     res = two_stage_det(img, MODEL)
-    out = perspective_tf_image(img, mat, (1000, 1000))
+    # out = perspective_tf_image(img, mat, (1000, 1000))
+    out = np.zeros((1000, 1000, 3), dtype=np.uint8)
+    warped = transform_normalize_sort(res, mat)
+
+    assigned = assign_to_table(warped)
 
     for i, c in enumerate(res):
         print(c)
         for j, instance in enumerate(res[c]):
-            x1, y1 = w * instance['pos1'][0], h * instance['pos1'][1]
-            x2, y2 = w * instance['pos2'][0], h * instance['pos2'][1]
-
-            tl = perspective_tf_points([(x1, y1)], mat)[0]
-            tr = perspective_tf_points([(x2, y1)], mat)[0]
-            bl = perspective_tf_points([(x1, y2)], mat)[0]
-            br = perspective_tf_points([(x2, y2)], mat)[0]
-
-            print(tl, tr, br, bl)
+            x1, y1 = scale_tup(instance['pos1'], w, h)
+            x2, y2 = scale_tup(instance['pos2'], w, h)
             draw_poly(img, [(x1, y1), (x2, y1), (x2, y2), (x1, y2)], color=COLORS[i % len(COLORS)])
-            draw_poly(out, [tl, tr, br, bl], color=COLORS[i % len(COLORS)])
+
+    pprint(assigned)
+
+    for i, instance in assigned.items():
+        try:
+            p1 = (instance['x'], instance['y'])
+            cen1 = tup_int(scale_tup(p1, 1000, 1000))
+
+            for p2 in instance['items']:
+                cen2 = tup_int(scale_tup(p2, 1000, 1000))
+                cv2.circle(out, cen2, 8, COLORS[1], -1)
+                cv2.line(out, cen1, cen2, COLORS[1], 2)
+
+            for p2 in instance['people']:
+                cen2 = tup_int(scale_tup(p2, 1000, 1000))
+                cv2.circle(out, cen2, 8, COLORS[2], -1)
+                cv2.line(out, cen1, cen2, COLORS[2], 2)
+
+            cv2.circle(out, cen1, 16, COLORS[0], -1)
+
+        except OverflowError:
+            pass
 
     # results.show()
     cv2.imwrite('in.png', img)
