@@ -1,3 +1,5 @@
+import json
+
 import cv2
 import numpy as np
 from ultralytics import YOLO
@@ -150,7 +152,7 @@ def transform_normalize_sort(data: dict[str, list[EntityEntry]], mat) -> dict[st
     return _out
 
 
-def assign_to_table(data: dict[str, list[EntityTransformed]]):
+def assign_to_table(data: dict[str, list[EntityTransformed]]) -> dict[int, TableEntry]:
     _tables = data['dining table']
     _people = data['person']
     _items = data['items']
@@ -209,6 +211,19 @@ def assign_to_table(data: dict[str, list[EntityTransformed]]):
     return _out
 
 
+def make_payload(data: dict[int, TableEntry]) -> str:
+    return json.dumps({'tables': [
+        {
+            'id': k,
+            'x': v['x'],
+            'y': v['y'],
+            'people': len(v['people']),
+            'item': len(v['items']),
+            'time': 0
+        } for k, v in data.items()
+    ]})
+
+
 if __name__ == '__main__':
     from pprint import pprint
 
@@ -221,10 +236,11 @@ if __name__ == '__main__':
 
     res = two_stage_det(img, MODEL)
     # out = perspective_tf_image(img, mat, (1000, 1000))
-    out = np.zeros((1000, 1000, 3), dtype=np.uint8)
     warped = transform_normalize_sort(res, mat)
-
     assigned = assign_to_table(warped)
+    payload = make_payload(assigned)
+
+    out = np.zeros((1000, 1000, 3), dtype=np.uint8)
 
     for i, c in enumerate(res):
         print(c)
@@ -232,8 +248,6 @@ if __name__ == '__main__':
             x1, y1 = scale_tup(instance['pos1'], w, h)
             x2, y2 = scale_tup(instance['pos2'], w, h)
             draw_poly(img, [(x1, y1), (x2, y1), (x2, y2), (x1, y2)], color=COLORS[i % len(COLORS)])
-
-    pprint(assigned)
 
     for i, instance in assigned.items():
         try:
@@ -254,6 +268,8 @@ if __name__ == '__main__':
 
         except OverflowError:
             pass
+
+    print(payload)
 
     # results.show()
     cv2.imwrite('in.png', img)
