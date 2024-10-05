@@ -1,7 +1,6 @@
 import math
 
 import cv2
-from lib_find_network_cam import find_network_cam
 from lib_transform import *
 
 points = []
@@ -57,8 +56,8 @@ def cb_click(_event, _x, _y, _flags, _param):
     cv2.imshow('Image', frame)
 
 
-cap = find_network_cam(username='admin', password='admin')
-target_fps = 1
+cap = cv2.VideoCapture('videos/IMG_4174.MOV')
+target_fps = 10
 target_fps = math.floor(target_fps)
 frame_interval = int(cap.get(cv2.CAP_PROP_FPS)) // target_fps
 

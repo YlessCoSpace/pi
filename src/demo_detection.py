@@ -1,4 +1,6 @@
 import json
+import logging
+import math
 
 import cv2
 import numpy as np
@@ -86,7 +88,7 @@ def add_bb_from_file(image, bb: list[tuple[tuple[int, int], tuple[int, int]]]) -
     _h, _w = image.shape[:2]
     _out = []
 
-    for b in _bb:
+    for b in bb:
         _out.append({
             'pos1': scale_tup(b[0], 1 / _w, 1 / _h),
             'pos2': scale_tup(b[1], 1 / _w, 1 / _h),
@@ -245,73 +247,113 @@ def make_payload(data: dict[int, TableEntry]) -> str:
     ]})
 
 
+stopped = False
+cap = cv2.VideoCapture('videos/IMG_4174.MOV')
+target_fps = 1
+target_fps = math.floor(target_fps)
+frame_interval = int(cap.get(cv2.CAP_PROP_FPS)) // target_fps
+
+MODEL = YOLO('yolo11n.pt')
+logging.getLogger("ultralytics").setLevel(logging.WARNING)
+
+# fourcc = cv2.VideoWriter_fourcc(*'mp4v')  # Use 'XVID' for .avi
+# out_video = cv2.VideoWriter('output_video.mp4', fourcc, 10.0, (1920, 1080))
+
 if __name__ == '__main__':
-    IM_PATH = 'videos/out/ffmpeg_1.bmp'
-    MODEL = YOLO('yolo11n.pt')
+    if not cap.isOpened():
+        print(f'Error: Unable to open video stream')
+        exit()
 
     # Load image properties
     mat = load_obj('perspective_matrix.pkl')
-    img = cv2.imread(IM_PATH)
-    h, w = img.shape[:2]
 
-    # Manually add table in addition to automatic table detection
-    bb = load_obj('tables.pkl')
-    more = add_bb_from_file(img, 'tables.pkl')
+    cv2.namedWindow('Image')
+    cv2.setWindowProperty('Image', cv2.WND_PROP_FULLSCREEN, cv2.WINDOW_FULLSCREEN)
 
-    # Auto object detection
-    res = two_stage_det(img, MODEL, more_tables=more)
+    while True:
+        ret, frame = cap.read()
+        if not ret:
+            print('Error: Unable to read frame from stream')
+            exit(1)
 
-    # Transform coordinates
-    warped = transform_normalize_sort(res, mat)
+        h, w = frame.shape[:2]
 
-    # Assign people and items to table
-    assigned = assign_to_table(warped)
+        # Manually add table in addition to automatic table detection
+        bb = load_obj('tables.pkl')
+        more = add_bb_from_file(frame, bb)
 
-    # Construct outgoing payload
-    payload = make_payload(assigned)
+        # Auto object detection
+        res = two_stage_det(frame, MODEL, more_tables=more)
 
-    out = np.zeros((1000, 1000, 3), dtype=np.uint8)
+        # Transform coordinates
+        warped = transform_normalize_sort(res, mat)
 
-    # Draw input frame overlays
-    for i, c in enumerate(res):
-        color = COLORS[i % len(COLORS)]
-        for j, instance in enumerate(res[c]):
-            x1, y1 = tup_int(scale_tup(instance['pos1'], w, h))
-            x2, y2 = tup_int(scale_tup(instance['pos2'], w, h))
-            draw_poly(img, [(x1, y1), (x2, y1), (x2, y2), (x1, y2)], color=color)
+        # Assign people and items to table
+        assigned = assign_to_table(warped)
 
-            text = f"{c}: {j}"
-            text_x, text_y = x1, y1 - 10 if y1 - 10 > 10 else y1 + 20
-            font_scale = 0.6
-            thickness = 2
-            (text_width, text_height), baseline = cv2.getTextSize(text, cv2.FONT_HERSHEY_SIMPLEX, font_scale, thickness)
-            cv2.rectangle(img, (text_x, text_y - text_height - baseline), (text_x + text_width, text_y + baseline),
-                          color, thickness=cv2.FILLED)
-            cv2.putText(img, text, (text_x, text_y), cv2.FONT_HERSHEY_SIMPLEX,
-                        font_scale, (255 - color[0], 255 - color[1], 255 - color[2]), thickness, cv2.LINE_AA)
+        # Construct outgoing payload
+        payload = make_payload(assigned)
 
-    # Draw output frame overlays
-    for i, instance in assigned.items():
-        try:
-            p1 = (instance['x'], instance['y'])
-            cen1 = tup_int(scale_tup(p1, 1000, 1000))
+        # Draw input frame overlays
+        for i, c in enumerate(res):
+            color = COLORS[i % len(COLORS)]
+            for j, instance in enumerate(res[c]):
+                x1, y1 = tup_int(scale_tup(instance['pos1'], w, h))
+                x2, y2 = tup_int(scale_tup(instance['pos2'], w, h))
+                draw_poly(frame, [(x1, y1), (x2, y1), (x2, y2), (x1, y2)], color=color)
 
-            for p2 in instance['items']:
-                cen2 = tup_int(scale_tup(p2, 1000, 1000))
-                cv2.circle(out, cen2, 8, COLORS[2], -1)
-                cv2.line(out, cen1, cen2, COLORS[2], 2)
+                text = f"{c}: {j}"
+                text_x, text_y = x1, y1 - 10 if y1 - 10 > 10 else y1 + 20
+                font_scale = 0.6
+                thickness = 2
+                (text_width, text_height), baseline = cv2.getTextSize(text, cv2.FONT_HERSHEY_SIMPLEX, font_scale,
+                                                                      thickness)
+                cv2.rectangle(frame, (text_x, text_y - text_height - baseline),
+                              (text_x + text_width, text_y + baseline),
+                              color, thickness=cv2.FILLED)
+                cv2.putText(frame, text, (text_x, text_y), cv2.FONT_HERSHEY_SIMPLEX,
+                            font_scale, (255 - color[0], 255 - color[1], 255 - color[2]), thickness, cv2.LINE_AA)
 
-            for p2 in instance['people']:
-                cen2 = tup_int(scale_tup(p2, 1000, 1000))
-                cv2.circle(out, cen2, 8, COLORS[1], -1)
-                cv2.line(out, cen1, cen2, COLORS[1], 2)
+        # Create an empty output frame
+        out = np.zeros((1000, 1000, 3), dtype=np.uint8)
 
-            cv2.circle(out, cen1, 16, COLORS[0], -1)
+        # Draw output frame overlays
+        for i, instance in assigned.items():
+            try:
+                p1 = (instance['x'], instance['y'])
+                cen1 = tup_int(scale_tup(p1, 1000, 1000))
 
-        except OverflowError:
-            pass
+                for p2 in instance['items']:
+                    cen2 = tup_int(scale_tup(p2, 1000, 1000))
+                    cv2.circle(out, cen2, 8, COLORS[2], -1)
+                    cv2.line(out, cen1, cen2, COLORS[2], 2)
 
-    print(payload)
+                for p2 in instance['people']:
+                    cen2 = tup_int(scale_tup(p2, 1000, 1000))
+                    cv2.circle(out, cen2, 8, COLORS[1], -1)
+                    cv2.line(out, cen1, cen2, COLORS[1], 2)
 
-    cv2.imwrite('in.png', img)
-    cv2.imwrite('out.png', out)
+                cv2.circle(out, cen1, 16, COLORS[0], -1)
+
+            except OverflowError:
+                pass
+
+        cv2.imshow('Image', frame)
+        # out_video.write(frame)
+
+        # Can be replaced to delay/sleep if no display is found
+        for _ in range(1000 // target_fps):
+            if cv2.waitKey(1) & 0xFF == ord('q'):
+                stopped = True
+                break
+
+        if stopped:
+            break
+
+        # Skip frames
+        for _ in range(frame_interval - 1):
+            cap.grab()
+
+    cap.release()
+    # out_video.release()
+    cv2.destroyAllWindows()
