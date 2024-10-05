@@ -94,12 +94,12 @@ def draw_poly(image, points, color=(0, 255, 0), thickness=2):
     return cv2.polylines(image, [pts], isClosed=True, color=color, thickness=thickness)
 
 
-def save_mat(obj, filename: str):
+def save_obj(obj, filename: str):
     with open(filename, mode='wb') as f:
         pickle.dump(obj, f)
 
 
-def load_mat(filename: str):
+def load_obj(filename: str):
     with open(filename, mode='rb') as f:
         return pickle.load(f)
 
@@ -210,8 +210,8 @@ def p_center(tl, tr, bl, br):
     return line_intersection(tl, br, bl, tr)
 
 __all__ = [
-    'save_mat',
-    'load_mat',
+    'save_obj',
+    'load_obj',
     'tup_int',
     'pad_image',
     'line_intersection',

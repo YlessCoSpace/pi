@@ -230,7 +230,7 @@ if __name__ == '__main__':
     IM_PATH = 'videos/out/ffmpeg_37.bmp'
     MODEL = YOLO('yolo11n.pt')
 
-    mat = load_mat('perspective_matrix.pkl')
+    mat = load_obj('perspective_matrix.pkl')
     img = cv2.imread(IM_PATH)
     h, w = img.shape[:2]
 
