@@ -124,6 +124,9 @@ def iou(box1, box2):
 
     return inter_area / union_area if union_area != 0 else 0
 
+def area(box):
+    x1, y1, x2, y2 = box
+    return abs((x2 - x1) * (y2 - y1))
 
 def coverage(box1, box2):
     x1, y1, x2, y2 = box1
@@ -232,5 +235,6 @@ __all__ = [
     'scale_tup',
     'offset_tup',
     'add_tup',
-    'p_center'
+    'p_center',
+    'area'
 ]

@@ -3,8 +3,9 @@ import json
 import cv2
 import numpy as np
 from ultralytics import YOLO
-from src.lib_transform import *
-from src.lib_transform import scale_tup
+from lib_transform import *
+from lib_transform import scale_tup
+from pprint import pprint
 
 # https://gist.github.com/rcland12/dc48e1963268ff98c8b2c4543e7a9be8
 ITEM_CLASSES = [
@@ -18,7 +19,7 @@ TABLE_CLASS = 60
 COLORS = [(0, 0, 255), (0, 255, 0), (255, 0, 0), (0, 255, 255), (255, 0, 255)]
 
 
-def two_stage_det(image, model: YOLO) -> dict[str, list[EntityEntry]]:
+def two_stage_det(image, model: YOLO, more_tables: list[EntityEntry] | None = None) -> dict[str, list[EntityEntry]]:
     def _to_result(__results):
         __ret = {}
         for __res in __results:
@@ -43,6 +44,9 @@ def two_stage_det(image, model: YOLO) -> dict[str, list[EntityEntry]]:
                 model.predict(image, classes=ITEM_CLASSES, conf=0.1)[0]]
 
     _ret = _to_result(_results)
+
+    if more_tables:
+        _ret['dining table'].extend(more_tables)
     _ret['dining table'] = merge_overlapped(_ret['dining table'], threshold=0.5)
 
     for _instance in _ret['dining table']:
@@ -66,11 +70,29 @@ def two_stage_det(image, model: YOLO) -> dict[str, list[EntityEntry]]:
     }
 
     for _c in _ret:
-        if _c == 'dining table' or _c == 'person':
-            continue
-        _out['items'].extend(_ret[_c])
+        if _c != 'dining table' and _c != 'person':
+            _out['items'].extend(_ret[_c])
 
     _out['items'] = merge_overlapped(_out['items'], threshold=0.5)
+
+    # Filter out small BBs
+    for _c in _out:
+        _out[_c] = list(filter(lambda x: area((*x['pos1'], *x['pos2'])) >= 0.01 * 0.01, _out[_c]))
+
+    return _out
+
+
+def add_bb_from_file(image, filename: str) -> list[EntityEntry]:
+    _h, _w = image.shape[:2]
+    _bb: list[tuple[tuple[int, int], tuple[int, int]]] = load_obj(filename)
+    _out = []
+
+    for b in _bb:
+        _out.append({
+            'pos1': scale_tup(b[0], 1 / _w, 1 / _h),
+            'pos2': scale_tup(b[1], 1 / _w, 1 / _h),
+            'conf': 1.0
+        })
 
     return _out
 
@@ -153,15 +175,15 @@ def transform_normalize_sort(data: dict[str, list[EntityEntry]], mat) -> dict[st
 
 
 def assign_to_table(data: dict[str, list[EntityTransformed]]) -> dict[int, TableEntry]:
-    _tables = data['dining table']
-    _people = data['person']
-    _items = data['items']
+    _tables = data['dining table'] if 'dining table' in data else []
+    _people = data['person'] if 'person' in data else []
+    _items = data['items'] if 'items' in data else []
 
     _out: dict[int, TableEntry] = {}
 
-    for index, table in enumerate(_tables):
+    for index, p_table in enumerate(_tables):
         try:
-            _cen = p_center(**table['real'])
+            _cen = p_center(**p_table['real'])
             tup_int(_cen)
             _out[index] = {
                 'x': _cen[0],
@@ -179,8 +201,8 @@ def assign_to_table(data: dict[str, list[EntityTransformed]]) -> dict[int, Table
         p1 = p_center(**person['real'])
         min_dist = float('inf')
         min_idx = None
-        for index, table in enumerate(_tables):
-            p2 = table_pos[index]
+        for index, p_table in enumerate(table_pos):
+            p2 = p_table
             d = euclidean_distance(p1, p2)
             if d < min_dist:
                 min_dist = d
@@ -195,8 +217,8 @@ def assign_to_table(data: dict[str, list[EntityTransformed]]) -> dict[int, Table
         p1 = p_center(**item['real'])
         min_dist = float('inf')
         min_idx = None
-        for index, table in enumerate(_tables):
-            p2 = table_pos[index]
+        for index, p_table in enumerate(table_pos):
+            p2 = p_table
             d = euclidean_distance(p1, p2)
             if d < min_dist:
                 min_dist = d
@@ -225,29 +247,46 @@ def make_payload(data: dict[int, TableEntry]) -> str:
 
 
 if __name__ == '__main__':
-    from pprint import pprint
-
-    IM_PATH = 'videos/out/ffmpeg_37.bmp'
+    IM_PATH = 'videos/out/ffmpeg_1.bmp'
     MODEL = YOLO('yolo11n.pt')
 
     mat = load_obj('perspective_matrix.pkl')
     img = cv2.imread(IM_PATH)
     h, w = img.shape[:2]
 
-    res = two_stage_det(img, MODEL)
-    # out = perspective_tf_image(img, mat, (1000, 1000))
+    # Manually add table in addition to automatic table detection
+    more = add_bb_from_file(img, 'tables.pkl')
+
+    # Auto object detection
+    res = two_stage_det(img, MODEL, more_tables=more);
+    pprint(res)
+
+    # Transform coordinates
     warped = transform_normalize_sort(res, mat)
+
+    # Assign people and items to table
     assigned = assign_to_table(warped)
+
     payload = make_payload(assigned)
 
     out = np.zeros((1000, 1000, 3), dtype=np.uint8)
 
     for i, c in enumerate(res):
-        print(c)
+        color = COLORS[i % len(COLORS)]
         for j, instance in enumerate(res[c]):
-            x1, y1 = scale_tup(instance['pos1'], w, h)
-            x2, y2 = scale_tup(instance['pos2'], w, h)
-            draw_poly(img, [(x1, y1), (x2, y1), (x2, y2), (x1, y2)], color=COLORS[i % len(COLORS)])
+            x1, y1 = tup_int(scale_tup(instance['pos1'], w, h))
+            x2, y2 = tup_int(scale_tup(instance['pos2'], w, h))
+            draw_poly(img, [(x1, y1), (x2, y1), (x2, y2), (x1, y2)], color=color)
+
+            text = f"{c}: {j}"
+            text_x, text_y = x1, y1 - 10 if y1 - 10 > 10 else y1 + 20
+            font_scale = 0.6
+            thickness = 2
+            (text_width, text_height), baseline = cv2.getTextSize(text, cv2.FONT_HERSHEY_SIMPLEX, font_scale, thickness)
+            cv2.rectangle(img, (text_x, text_y - text_height - baseline), (text_x + text_width, text_y + baseline),
+                          color, thickness=cv2.FILLED)
+            cv2.putText(img, text, (text_x, text_y), cv2.FONT_HERSHEY_SIMPLEX,
+                        font_scale, (255 - color[0], 255 - color[1], 255 - color[2]), thickness, cv2.LINE_AA)
 
     for i, instance in assigned.items():
         try:
@@ -256,13 +295,13 @@ if __name__ == '__main__':
 
             for p2 in instance['items']:
                 cen2 = tup_int(scale_tup(p2, 1000, 1000))
-                cv2.circle(out, cen2, 8, COLORS[1], -1)
-                cv2.line(out, cen1, cen2, COLORS[1], 2)
+                cv2.circle(out, cen2, 8, COLORS[2], -1)
+                cv2.line(out, cen1, cen2, COLORS[2], 2)
 
             for p2 in instance['people']:
                 cen2 = tup_int(scale_tup(p2, 1000, 1000))
-                cv2.circle(out, cen2, 8, COLORS[2], -1)
-                cv2.line(out, cen1, cen2, COLORS[2], 2)
+                cv2.circle(out, cen2, 8, COLORS[1], -1)
+                cv2.line(out, cen1, cen2, COLORS[1], 2)
 
             cv2.circle(out, cen1, 16, COLORS[0], -1)
 
@@ -271,9 +310,5 @@ if __name__ == '__main__':
 
     print(payload)
 
-    # results.show()
     cv2.imwrite('in.png', img)
     cv2.imwrite('out.png', out)
-    # cv2.imshow('Output', out)
-    # cv2.waitKey(0)
-    # cv2.destroyAllWindows()
