@@ -62,6 +62,7 @@ class MQTTPublisher:
         self.broker_address = broker_address
         self.port = port
         self.client = mqtt.Client()
+        self.client.tls_set()
 
         if username and password:
             self.client.username_pw_set(username, password)

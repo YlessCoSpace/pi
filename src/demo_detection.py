@@ -238,14 +238,14 @@ def assign_to_table(data: dict[str, list[EntityTransformed]]) -> dict[int, Table
     return _out
 
 
-def make_payload(data: dict[int, TableEntry], max_x=13.5, max_y=11.5) -> str:
+def make_payload(data: dict[int, TableEntry], max_x=10.0, max_y=10.0) -> str:
     return json.dumps(
         {
             'tables': [
                 {
                     'id': k,
-                    'x': v['x'],
-                    'y': v['y'],
+                    'x': v['x'] * max_x,
+                    'y': v['y'] * max_y,
                     'people': len(v['people']),
                     'item': bool(len(v['items'])),
                     'time': 0,
@@ -271,10 +271,10 @@ logging.getLogger("ultralytics").setLevel(logging.WARNING)
 # out_video = cv2.VideoWriter('output_video.mp4', fourcc, 10.0, (1920, 1080))
 
 if __name__ == '__main__':
-    pub = MQTTPublisher('cp-iot.vt.md',
-                        username='raspberrypi',
-                        password='mayu',
-                        port=1883)
+    pub = MQTTPublisher('8eaeae364d3c44be8113419a0b9bf948.s1.eu.hivemq.cloud',
+                        username='admin',
+                        password='Admin123',
+                        port=8883)
 
     if not cap.isOpened():
         print(f'Error: Unable to open video stream')
