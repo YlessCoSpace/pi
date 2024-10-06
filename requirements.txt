@@ -3,3 +3,4 @@ ultralytics
 netifaces
 dill
 numpy
+paho-mqtt

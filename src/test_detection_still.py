@@ -4,7 +4,7 @@ import cv2
 import numpy as np
 from ultralytics import YOLO
 from lib_transform import *
-from lib_transform import scale_tup
+from lib_network import *
 from pprint import pprint
 
 # https://gist.github.com/rcland12/dc48e1963268ff98c8b2c4543e7a9be8
@@ -44,6 +44,10 @@ def two_stage_det(image, model: YOLO, more_tables: list[EntityEntry] | None = No
                 model.predict(image, classes=ITEM_CLASSES, conf=0.1)[0]]
 
     _ret = _to_result(_results)
+
+    for k in ['dining table', 'person']:
+        if k not in _ret:
+            _ret[k] = []
 
     if more_tables:
         _ret['dining table'].extend(more_tables)
@@ -86,7 +90,7 @@ def add_bb_from_file(image, bb: list[tuple[tuple[int, int], tuple[int, int]]]) -
     _h, _w = image.shape[:2]
     _out = []
 
-    for b in _bb:
+    for b in bb:
         _out.append({
             'pos1': scale_tup(b[0], 1 / _w, 1 / _h),
             'pos2': scale_tup(b[1], 1 / _w, 1 / _h),
@@ -232,20 +236,31 @@ def assign_to_table(data: dict[str, list[EntityTransformed]]) -> dict[int, Table
     return _out
 
 
-def make_payload(data: dict[int, TableEntry]) -> str:
-    return json.dumps({'tables': [
+def make_payload(data: dict[int, TableEntry], max_x=13.5, max_y=11.5) -> str:
+    return json.dumps(
         {
-            'id': k,
-            'x': v['x'],
-            'y': v['y'],
-            'people': len(v['people']),
-            'item': len(v['items']),
-            'time': 0
-        } for k, v in data.items()
-    ]})
+            'tables': [
+                {
+                    'id': k,
+                    'x': v['x'],
+                    'y': v['y'],
+                    'people': len(v['people']),
+                    'item': bool(len(v['items'])),
+                    'time': 0,
+                    'startTime': 0
+                } for k, v in data.items()
+            ],
+            'max_x': max_x,
+            'max_y': max_y
+        }
+    )
 
 
 if __name__ == '__main__':
+    pub = MQTTPublisher('cp-iot.vt.md',
+                        username='raspberrypi',
+                        password='mayu',
+                        port=1883)
     IM_PATH = 'videos/out/ffmpeg_1.bmp'
     MODEL = YOLO('yolo11n.pt')
 
@@ -256,7 +271,7 @@ if __name__ == '__main__':
 
     # Manually add table in addition to automatic table detection
     bb = load_obj('tables.pkl')
-    more = add_bb_from_file(img, 'tables.pkl')
+    more = add_bb_from_file(img, bb)
 
     # Auto object detection
     res = two_stage_det(img, MODEL, more_tables=more)
@@ -269,6 +284,7 @@ if __name__ == '__main__':
 
     # Construct outgoing payload
     payload = make_payload(assigned)
+    pub.publish('seatmap', payload)
 
     out = np.zeros((1000, 1000, 3), dtype=np.uint8)
 
@@ -315,3 +331,4 @@ if __name__ == '__main__':
 
     cv2.imwrite('in.png', img)
     cv2.imwrite('out.png', out)
+    pub.disconnect()

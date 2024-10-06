@@ -1,7 +1,9 @@
+import cv2
 import socket
 import netifaces as ni
 import ipaddress
 from concurrent.futures import ThreadPoolExecutor, as_completed
+import paho.mqtt.client as mqtt
 
 
 def scan_ip_port(port, *, max_workers=255) -> list[str]:
@@ -47,7 +49,42 @@ def scan_ip_port(port, *, max_workers=255) -> list[str]:
     return open_ips
 
 
-# Run the scan
-if __name__ == '__main__':
-    open_rtsp_ips = scan_ip_port(8554, max_workers=255)
-    print(f'Devices with RTSP (port 8554) open: {open_rtsp_ips}')
+def find_network_cam(username: str, password: str) -> cv2.VideoCapture:
+    cam_ip = scan_ip_port(8554, max_workers=255)
+    if cam_ip:
+        return cv2.VideoCapture(f'rtsp://{username}:{password}@{cam_ip[0]}:8554/live')
+    else:
+        raise FileNotFoundError('No video devices on the network')
+
+
+class MQTTPublisher:
+    def __init__(self, broker_address, username=None, password=None, port=1883):
+        self.broker_address = broker_address
+        self.port = port
+        self.client = mqtt.Client()
+
+        if username and password:
+            self.client.username_pw_set(username, password)
+
+        self.client.on_connect = self.on_connect
+        self.client.connect(self.broker_address, self.port, 60)
+        self.client.loop_start()
+
+    def on_connect(self, client, userdata, flags, rc):
+        print(f'Connected to {self.broker_address} with result code {rc}')
+
+    def publish(self, topic, message):
+        self.client.publish(topic, message)
+        print(f'Published `{message}` to `{topic}`')
+
+    def disconnect(self):
+        self.client.loop_stop()
+        self.client.disconnect()
+        print('Disconnected from the broker.')
+
+
+__all__ = [
+    'scan_ip_port',
+    'find_network_cam',
+    'MQTTPublisher'
+]

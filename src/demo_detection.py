@@ -6,7 +6,7 @@ import cv2
 import numpy as np
 from ultralytics import YOLO
 from lib_transform import *
-from lib_transform import scale_tup
+from lib_network import *
 from pprint import pprint
 
 # https://gist.github.com/rcland12/dc48e1963268ff98c8b2c4543e7a9be8
@@ -42,10 +42,14 @@ def two_stage_det(image, model: YOLO, more_tables: list[EntityEntry] | None = No
 
     _h, _w = image.shape[:2]
     _results = [model.predict(image, classes=[PERSON_CLASS], conf=0.25)[0],
-                model.predict(image, classes=[TABLE_CLASS], conf=0.05)[0],
+                model.predict(image, classes=[TABLE_CLASS], conf=0.25)[0],
                 model.predict(image, classes=ITEM_CLASSES, conf=0.1)[0]]
 
     _ret = _to_result(_results)
+
+    for k in ['dining table', 'person']:
+        if k not in _ret:
+            _ret[k] = []
 
     if more_tables:
         _ret['dining table'].extend(more_tables)
@@ -234,22 +238,29 @@ def assign_to_table(data: dict[str, list[EntityTransformed]]) -> dict[int, Table
     return _out
 
 
-def make_payload(data: dict[int, TableEntry]) -> str:
-    return json.dumps({'tables': [
+def make_payload(data: dict[int, TableEntry], max_x=13.5, max_y=11.5) -> str:
+    return json.dumps(
         {
-            'id': k,
-            'x': v['x'],
-            'y': v['y'],
-            'people': len(v['people']),
-            'item': len(v['items']),
-            'time': 0
-        } for k, v in data.items()
-    ]})
+            'tables': [
+                {
+                    'id': k,
+                    'x': v['x'],
+                    'y': v['y'],
+                    'people': len(v['people']),
+                    'item': bool(len(v['items'])),
+                    'time': 0,
+                    'startTime': 0
+                } for k, v in data.items()
+            ],
+            'max_x': max_x,
+            'max_y': max_y
+        }
+    )
 
 
 stopped = False
 cap = cv2.VideoCapture('videos/IMG_4174.MOV')
-target_fps = 1
+target_fps = 2
 target_fps = math.floor(target_fps)
 frame_interval = int(cap.get(cv2.CAP_PROP_FPS)) // target_fps
 
@@ -260,6 +271,11 @@ logging.getLogger("ultralytics").setLevel(logging.WARNING)
 # out_video = cv2.VideoWriter('output_video.mp4', fourcc, 10.0, (1920, 1080))
 
 if __name__ == '__main__':
+    pub = MQTTPublisher('cp-iot.vt.md',
+                        username='raspberrypi',
+                        password='mayu',
+                        port=1883)
+
     if not cap.isOpened():
         print(f'Error: Unable to open video stream')
         exit()
@@ -293,6 +309,7 @@ if __name__ == '__main__':
 
         # Construct outgoing payload
         payload = make_payload(assigned)
+        pub.publish('seatmap', payload)
 
         # Draw input frame overlays
         for i, c in enumerate(res):
@@ -338,7 +355,8 @@ if __name__ == '__main__':
             except OverflowError:
                 pass
 
-        cv2.imshow('Image', frame)
+        # cv2.imshow('Image', frame)
+        cv2.imshow('Image', out)
         # out_video.write(frame)
 
         # Can be replaced to delay/sleep if no display is found
@@ -354,6 +372,7 @@ if __name__ == '__main__':
         for _ in range(frame_interval - 1):
             cap.grab()
 
+    pub.disconnect()
     cap.release()
     # out_video.release()
     cv2.destroyAllWindows()
