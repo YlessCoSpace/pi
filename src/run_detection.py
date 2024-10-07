@@ -51,9 +51,7 @@ def two_stage_det(image, model: YOLO, more_tables: list[EntityEntry] | None = No
         return __ret
 
     _h, _w = image.shape[:2]
-    _results = [model.predict(image, classes=[PERSON_CLASS], conf=0.25)[0],
-                model.predict(image, classes=[TABLE_CLASS], conf=0.25)[0],
-                model.predict(image, classes=ITEM_CLASSES, conf=0.2)[0]]
+    _results = [model.predict(image, classes=[PERSON_CLASS, TABLE_CLASS, *ITEM_CLASSES], conf=0.25)[0]]
 
     _ret = _to_result(_results)
 
