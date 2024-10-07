@@ -25,9 +25,11 @@ if __name__ == '__main__':
                 print('Error: Unable to read frame from stream')
                 break
 
-            cv2.imshow('Image', frame)
-            if cv2.waitKey(1) & 0xFF == ord('q'):
-                stopped = True
+            print(ret)
+
+            # cv2.imshow('Image', frame)
+            # if cv2.waitKey(1) & 0xFF == ord('q'):
+            #     stopped = True
 
             # for _ in range(1000 // target_fps):
             #     if cv2.waitKey(1) & 0xFF == ord('q'):
