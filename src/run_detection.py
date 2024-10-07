@@ -270,7 +270,7 @@ def make_payload(data: dict[int, TableEntry], max_x=10.0, max_y=10.0, offset=2.5
 
 REALTIME = True
 cap = find_network_cam(username='admin', password='admin')
-target_fps = 1
+target_fps = 0.5
 q_input = queue.Queue()
 q_output = queue.Queue()
 
