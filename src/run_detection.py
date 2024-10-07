@@ -1,7 +1,9 @@
 import json
 import logging
 import math
-
+import queue
+import threading
+import time
 import cv2
 import numpy as np
 from ultralytics import YOLO
@@ -110,7 +112,7 @@ def add_bb_from_file(image, bb: list[tuple[tuple[int, int], tuple[int, int]]]) -
     return _out
 
 
-def transform_normalize_sort(data: dict[str, list[EntityEntry]], mat) -> dict[str, list[EntityTransformed]]:
+def transform_normalize_sort(data: dict[str, list[EntityEntry]], mat, w, h) -> dict[str, list[EntityTransformed]]:
     _out: dict[str, list[EntityTransformed]] = {}
 
     _min_x, _min_y = float('inf'), float('inf')
@@ -267,130 +269,173 @@ def make_payload(data: dict[int, TableEntry], max_x=10.0, max_y=10.0, offset=2.5
 
 
 REALTIME = True
-stopped = False
 cap = find_network_cam(username='admin', password='admin')
 target_fps = 1
-target_fps = math.floor(target_fps)
-frame_interval = int(cap.get(cv2.CAP_PROP_FPS)) // target_fps
+q_input = queue.Queue()
+q_output = queue.Queue()
+
+stopped = threading.Event()
 
 MODEL = YOLO('yolo11n.pt')
 logging.getLogger("ultralytics").setLevel(logging.WARNING)
 
-# out_video = cv2.VideoWriter('videos/out_2.mp4', cv2.VideoWriter_fourcc(*'mp4v'), 30.0, (1920, 1080))
 
-if __name__ == '__main__':
+def receive():
+    prev = 0
+    try:
+        while not stopped.is_set():
+            time_elapsed = time.time() - prev
+            ret, frame = cap.read()
+            if not ret:
+                break
+
+            if time_elapsed > 1. / target_fps:
+                prev = time.time()
+                q_input.put(frame)
+    except Exception as e:
+        print(f"Error in receive thread: {e}")
+    finally:
+        print("Releasing camera...")
+        cap.release()
+
+
+def process():
+    print("Started processing")
+
     pub = MQTTPublisher('8eaeae364d3c44be8113419a0b9bf948.s1.eu.hivemq.cloud',
                         username='admin',
                         password='Admin123',
                         port=8883)
 
-    if not cap.isOpened():
-        print(f'Error: Unable to open video stream')
-        exit()
-
-    # Load image properties
+    # Load weights
     mat = load_obj('perspective_matrix.pkl')
+    bb = load_obj('tables.pkl')
 
-    cv2.namedWindow('Image')
-    cv2.setWindowProperty('Image', cv2.WND_PROP_FULLSCREEN, cv2.WINDOW_FULLSCREEN)
+    while not stopped.is_set():
+        try:
+            if not q_input.empty():
+                fr = q_input.get(timeout=1)
+                # Load image properties
+                h, w = fr.shape[:2]
 
-    while True:
-        ret, frame = cap.read()
-        if not ret:
-            print('Error: Unable to read frame from stream')
-            exit(1)
+                # Manually add table in addition to automatic table detection
+                more = add_bb_from_file(fr, bb)
 
-        h, w = frame.shape[:2]
+                # Auto object detection
+                res = two_stage_det(fr, MODEL, more_tables=more)
 
-        # Manually add table in addition to automatic table detection
-        bb = load_obj('tables.pkl')
-        more = add_bb_from_file(frame, bb)
+                # Transform coordinates
+                warped = transform_normalize_sort(res, mat, w, h)
 
-        # Auto object detection
-        res = two_stage_det(frame, MODEL, more_tables=more)
+                # Assign people and items to table
+                assigned = assign_to_table(warped)
 
-        # Transform coordinates
-        warped = transform_normalize_sort(res, mat)
+                # Construct outgoing payload
+                payload = make_payload(assigned)
+                pub.publish('seatmap', payload)
 
-        # Assign people and items to table
-        assigned = assign_to_table(warped)
+                # Draw input frame overlays
+                for i, c in enumerate(res):
+                    color = COLORS[i % len(COLORS)]
+                    for j, instance in enumerate(res[c]):
+                        x1, y1 = tup_int(scale_tup(instance['pos1'], w, h))
+                        x2, y2 = tup_int(scale_tup(instance['pos2'], w, h))
+                        draw_poly(fr, [(x1, y1), (x2, y1), (x2, y2), (x1, y2)], color=color)
 
-        # Construct outgoing payload
-        payload = make_payload(assigned)
-        # pub.publish('seatmap', payload)
+                        text = f"{c}: {j}"
+                        text_x, text_y = x1, y1 - 10 if y1 - 10 > 10 else y1 + 20
+                        font_scale = 0.6
+                        thickness = 2
+                        (text_width, text_height), baseline = cv2.getTextSize(text, cv2.FONT_HERSHEY_SIMPLEX,
+                                                                              font_scale,
+                                                                              thickness)
+                        cv2.rectangle(fr, (text_x, text_y - text_height - baseline),
+                                      (text_x + text_width, text_y + baseline),
+                                      color, thickness=cv2.FILLED)
+                        cv2.putText(fr, text, (text_x, text_y), cv2.FONT_HERSHEY_SIMPLEX,
+                                    font_scale, (255 - color[0], 255 - color[1], 255 - color[2]), thickness,
+                                    cv2.LINE_AA)
 
-        # Draw input frame overlays
-        for i, c in enumerate(res):
-            color = COLORS[i % len(COLORS)]
-            for j, instance in enumerate(res[c]):
-                x1, y1 = tup_int(scale_tup(instance['pos1'], w, h))
-                x2, y2 = tup_int(scale_tup(instance['pos2'], w, h))
-                draw_poly(frame, [(x1, y1), (x2, y1), (x2, y2), (x1, y2)], color=color)
+                # Create an empty output frame
+                out = np.zeros((1000, 1000, 3), dtype=np.uint8)
 
-                text = f"{c}: {j}"
-                text_x, text_y = x1, y1 - 10 if y1 - 10 > 10 else y1 + 20
-                font_scale = 0.6
-                thickness = 2
-                (text_width, text_height), baseline = cv2.getTextSize(text, cv2.FONT_HERSHEY_SIMPLEX, font_scale,
-                                                                      thickness)
-                cv2.rectangle(frame, (text_x, text_y - text_height - baseline),
-                              (text_x + text_width, text_y + baseline),
-                              color, thickness=cv2.FILLED)
-                cv2.putText(frame, text, (text_x, text_y), cv2.FONT_HERSHEY_SIMPLEX,
-                            font_scale, (255 - color[0], 255 - color[1], 255 - color[2]), thickness, cv2.LINE_AA)
+                # Draw output frame overlays
+                for i, instance in assigned.items():
+                    try:
+                        p1 = (instance['x'], instance['y'])
+                        cen1 = tup_int(scale_tup(p1, 1000, 1000))
 
-        # Create an empty output frame
-        out = np.zeros((1000, 1000, 3), dtype=np.uint8)
+                        for p2 in instance['items']:
+                            cen2 = tup_int(scale_tup(p2, 1000, 1000))
+                            cv2.circle(out, cen2, 8, COLORS[2], -1)
+                            cv2.line(out, cen1, cen2, COLORS[2], 2)
 
-        # Draw output frame overlays
-        for i, instance in assigned.items():
-            try:
-                p1 = (instance['x'], instance['y'])
-                cen1 = tup_int(scale_tup(p1, 1000, 1000))
+                        for p2 in instance['people']:
+                            cen2 = tup_int(scale_tup(p2, 1000, 1000))
+                            cv2.circle(out, cen2, 8, COLORS[1], -1)
+                            cv2.line(out, cen1, cen2, COLORS[1], 2)
 
-                for p2 in instance['items']:
-                    cen2 = tup_int(scale_tup(p2, 1000, 1000))
-                    cv2.circle(out, cen2, 8, COLORS[2], -1)
-                    cv2.line(out, cen1, cen2, COLORS[2], 2)
+                        cv2.circle(out, cen1, 16, COLORS[0], -1)
 
-                for p2 in instance['people']:
-                    cen2 = tup_int(scale_tup(p2, 1000, 1000))
-                    cv2.circle(out, cen2, 8, COLORS[1], -1)
-                    cv2.line(out, cen1, cen2, COLORS[1], 2)
+                    except OverflowError:
+                        pass
 
-                cv2.circle(out, cen1, 16, COLORS[0], -1)
+                scaled_out = cv2.resize(out, (500, 500))
+                for c in range(0, 3):
+                    fr[0:500, 1420:1920, c] = scaled_out[:, :, c]
+                q_output.put(fr)
 
-            except OverflowError:
-                pass
-
-        o_frame = np.hstack((frame,))
-        scaled_out = cv2.resize(out, (500, 500))
-        for c in range(0, 3):
-            frame[0:500, 1420:1920, c] = scaled_out[:, :, c]
-
-        cv2.imshow('Image', frame)
-        # out_video.write(frame)
-
-        # Can be replaced to delay/sleep if no display is found
-        if REALTIME:
-            for _ in range(1000 // target_fps):
-                if cv2.waitKey(1) & 0xFF == ord('q'):
-                    stopped = True
-                    break
-        else:
-            if cv2.waitKey(1) & 0xFF == ord('q'):
-                stopped = True
-                break
-
-        if stopped:
-            break
-
-        # Skip frames
-        if REALTIME:
-            for _ in range(frame_interval - 1):
-                cap.grab()
+        except queue.Empty:
+            pass
 
     pub.disconnect()
-    cap.release()
-    # out_video.release()
+
+
+def display():
+    cv2.namedWindow('Image')
+    cv2.setWindowProperty('Image', cv2.WND_PROP_FULLSCREEN, cv2.WINDOW_FULLSCREEN)
+    print("Started displaying")
+
+    while not stopped.is_set():
+        try:
+            if not q_output.empty():
+                fr = q_output.get(timeout=1)
+                cv2.imshow("Image", fr)
+        except queue.Empty:
+            pass
+
+        if cv2.waitKey(1) & 0xFF == ord('q'):
+            stopped.set()
+            break
+
     cv2.destroyAllWindows()
+
+
+if __name__ == '__main__':
+
+    try:
+        if not cap.isOpened():
+            print(f'Error: Unable to open video stream')
+            exit()
+
+        p1 = threading.Thread(target=receive)
+        p2 = threading.Thread(target=process)
+        p3 = threading.Thread(target=display)
+        p1.start()
+        p2.start()
+        p3.start()
+
+        p1.join()
+        p2.join()
+        p3.join()
+
+    except KeyboardInterrupt:
+        print("KeyboardInterrupt caught, stopping threads...")
+        stopped.set()
+
+    finally:
+        p1.join()
+        p2.join()
+        p3.join()
+
+        print("Program terminated.")

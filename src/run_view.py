@@ -8,7 +8,7 @@ from lib_network import *
 cap = find_network_cam(username='admin', password='admin')
 target_fps = 1
 q = queue.Queue()
-stopped = threading.Event()  # Event to signal threads to stop
+stopped = threading.Event()
 
 
 def receive():
@@ -64,7 +64,6 @@ if __name__ == '__main__':
         p1.start()
         p2.start()
 
-        # Wait for threads to finish or for KeyboardInterrupt
         p1.join()
         p2.join()
 

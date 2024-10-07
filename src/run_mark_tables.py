@@ -1,6 +1,6 @@
-import math
+import queue
+import threading
 import time
-
 import cv2
 import argparse
 from lib_network import *
@@ -9,7 +9,7 @@ from lib_transform import *
 COLORS = [(0, 0, 255), (0, 255, 0), (255, 0, 0), (0, 255, 255), (255, 0, 255)]
 
 points = []
-stopped = False
+frame = None
 
 
 def draw_overlays(img):
@@ -30,6 +30,7 @@ def draw_overlays(img):
 
 
 def cb_click(_event, _x, _y, _flags, _param):
+    global frame, stopped
     if _event != cv2.EVENT_LBUTTONDOWN:
         return
 
@@ -38,11 +39,55 @@ def cb_click(_event, _x, _y, _flags, _param):
     draw_overlays(frame)
     cv2.imshow('Image', frame)
 
+    if len(points) >= num_points:
+        stopped.set()
+
 
 cap = find_network_cam(username='admin', password='admin')
 target_fps = 1
-target_fps = math.floor(target_fps)
-frame_interval = int(cap.get(cv2.CAP_PROP_FPS)) // target_fps
+q = queue.Queue()
+stopped = threading.Event()
+
+def receive():
+    global frame
+    prev = 0
+    try:
+        while not stopped.is_set():
+            time_elapsed = time.time() - prev
+            ret, frame = cap.read()
+            if not ret:
+                break
+
+            if time_elapsed > 1. / target_fps:
+                prev = time.time()
+                q.put(frame)
+    except Exception as e:
+        print(f"Error in receive thread: {e}")
+    finally:
+        print("Releasing camera...")
+        cap.release()
+
+
+def display():
+    cv2.namedWindow('Image')
+    cv2.setWindowProperty('Image', cv2.WND_PROP_FULLSCREEN, cv2.WINDOW_FULLSCREEN)
+    cv2.setMouseCallback('Image', cb_click)
+    print("Started displaying")
+
+    while not stopped.is_set():
+        try:
+            if not q.empty():
+                fr = q.get(timeout=1)
+                draw_overlays(fr)
+                cv2.imshow("Image", fr)
+        except queue.Empty:
+            pass
+
+        if cv2.waitKey(1) & 0xFF == ord('q'):
+            stopped.set()
+            break
+
+    cv2.destroyAllWindows()
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description="Mark points on an image.")
@@ -50,43 +95,30 @@ if __name__ == '__main__':
     args = parser.parse_args()
     num_points = args.tables * 2
 
-    if not cap.isOpened():
-        print(f'Error: Unable to open video stream')
-        exit()
+    try:
+        if not cap.isOpened():
+            print(f'Error: Unable to open video stream')
+            exit()
 
-    cv2.namedWindow('Image')
-    cv2.setWindowProperty('Image', cv2.WND_PROP_FULLSCREEN, cv2.WINDOW_FULLSCREEN)
-    cv2.setMouseCallback('Image', cb_click)
+        p1 = threading.Thread(target=receive)
+        p2 = threading.Thread(target=display)
+        p1.start()
+        p2.start()
 
-    while True:
-        ret, frame = cap.read()
-        if not ret:
-            print('Error: Unable to read frame from stream')
-            exit(1)
+        p1.join()
+        p2.join()
 
-        draw_overlays(frame)
-        cv2.imshow('Image', frame)
+    except KeyboardInterrupt:
+        print("KeyboardInterrupt caught, stopping threads...")
+        stopped.set()
 
-        for _ in range(1000 // target_fps):
-            if len(points) >= num_points:
-                stopped = True
-                break
+    finally:
+        p1.join()
+        p2.join()
 
-            if cv2.waitKey(1) & 0xFF == ord('q'):
-                stopped = True
-                break
+        o = [tuple(points[i:i + 2]) for i in range(0, len(points), 2)]
+        print(o)
+        save_obj(o, 'tables.pkl')
+        print('Saved points!')
 
-        if stopped:
-            break
-
-        # Skip frames
-        for _ in range(frame_interval - 1):
-            cap.grab()
-
-    cap.release()
-    o = [tuple(points[i:i + 2]) for i in range(0, len(points), 2)]
-    print(o)
-    save_obj(o, 'tables.pkl')
-    print('Saved points!')
-    time.sleep(3)
-    cv2.destroyAllWindows()
+        print("Program terminated.")

@@ -1,11 +1,12 @@
-import math
-
+import queue
+import threading
+import time
 import cv2
 from lib_network import *
 from lib_transform import *
 
+frame = None
 points = []
-stopped = False
 tf = None
 
 
@@ -26,7 +27,7 @@ def draw_overlays(img):
 
 
 def cb_click(_event, _x, _y, _flags, _param):
-    global stopped, points, tf
+    global stopped, points, tf, frame
 
     if _event != cv2.EVENT_LBUTTONDOWN:
         return
@@ -51,7 +52,7 @@ def cb_click(_event, _x, _y, _flags, _param):
 
         save_obj(mat, 'perspective_matrix.pkl')
         print('Saved weights!')
-        stopped = True
+        stopped.set()
 
     draw_overlays(frame)
     cv2.imshow('Image', frame)
@@ -59,46 +60,71 @@ def cb_click(_event, _x, _y, _flags, _param):
 
 cap = find_network_cam(username='admin', password='admin')
 target_fps = 1
-target_fps = math.floor(target_fps)
-frame_interval = int(cap.get(cv2.CAP_PROP_FPS)) // target_fps
+q = queue.Queue()
+stopped = threading.Event()
 
-if __name__ == '__main__':
-    if not cap.isOpened():
-        print(f'Error: Unable to open video stream')
-        exit()
 
+def receive():
+    global frame
+    prev = 0
+    try:
+        while not stopped.is_set():
+            time_elapsed = time.time() - prev
+            ret, frame = cap.read()
+            if not ret:
+                break
+
+            if time_elapsed > 1. / target_fps:
+                prev = time.time()
+                q.put(frame)
+    except Exception as e:
+        print(f"Error in receive thread: {e}")
+    finally:
+        print("Releasing camera...")
+        cap.release()
+
+
+def display():
     cv2.namedWindow('Image')
     cv2.setWindowProperty('Image', cv2.WND_PROP_FULLSCREEN, cv2.WINDOW_FULLSCREEN)
     cv2.setMouseCallback('Image', cb_click)
+    print("Started displaying")
 
-    while True:
-        ret, frame = cap.read()
-        if not ret:
-            print('Error: Unable to read frame from stream')
-            exit(1)
+    while not stopped.is_set():
+        try:
+            if not q.empty():
+                fr = q.get(timeout=1)
+                draw_overlays(fr)
+                cv2.imshow("Image", fr)
+        except queue.Empty:
+            pass
 
-        draw_overlays(frame)
-        cv2.imshow('Image', frame)
-
-        for _ in range(1000 // target_fps):
-            if len(points) >= 8:
-                stopped = True
-                break
-
-            if cv2.waitKey(1) & 0xFF == ord('q'):
-                stopped = True
-                break
-
-        if stopped:
+        if cv2.waitKey(1) & 0xFF == ord('q'):
+            stopped.set()
             break
 
-        # Skip frames
-        for _ in range(frame_interval - 1):
-            cap.grab()
-
-    cap.release()
-    cv2.namedWindow('Transformed')
-    cv2.setWindowProperty('Transformed', cv2.WND_PROP_FULLSCREEN, cv2.WINDOW_FULLSCREEN)
-    cv2.imshow('Transformed', tf)
-    cv2.waitKey(3000)
     cv2.destroyAllWindows()
+
+
+if __name__ == '__main__':
+    try:
+        if not cap.isOpened():
+            print(f'Error: Unable to open video stream')
+            exit()
+
+        p1 = threading.Thread(target=receive)
+        p2 = threading.Thread(target=display)
+        p1.start()
+        p2.start()
+
+        p1.join()
+        p2.join()
+
+    except KeyboardInterrupt:
+        print("KeyboardInterrupt caught, stopping threads...")
+        stopped.set()
+
+    finally:
+        p1.join()
+        p2.join()
+        print("Program terminated.")
