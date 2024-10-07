@@ -316,6 +316,7 @@ def process():
                 # Always get latest frame possible
                 while not q_input.empty():
                     fr = q_input.get(timeout=1)
+                print('Got frame!')
                 # Load image properties
                 h, w = fr.shape[:2]
 
