@@ -275,7 +275,7 @@ q_output = queue.Queue()
 stopped = threading.Event()
 
 MODEL = YOLO('yolo11n.pt')
-logging.getLogger("ultralytics").setLevel(logging.WARNING)
+#logging.getLogger("ultralytics").setLevel(logging.WARNING)
 
 
 def receive():
@@ -313,6 +313,9 @@ def process():
         try:
             if not q_input.empty():
                 fr = q_input.get(timeout=1)
+                # Always get latest frame possible
+                while not q_input.empty():
+                    fr = q_input.get(timeout=1)
                 # Load image properties
                 h, w = fr.shape[:2]
 
