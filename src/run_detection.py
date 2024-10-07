@@ -275,7 +275,9 @@ q_output = queue.Queue()
 stopped = threading.Event()
 
 MODEL = YOLO('yolo11n.pt')
-#logging.getLogger("ultralytics").setLevel(logging.WARNING)
+
+
+# logging.getLogger("ultralytics").setLevel(logging.WARNING)
 
 
 def receive():
@@ -324,7 +326,7 @@ def process():
                 more = add_bb_from_file(fr, bb)
 
                 # Auto object detection
-                res = two_stage_det(fr, MODEL, more_tables=more)
+                res = two_stage_det(cv2.resize(fr, (0, 0), fx=0.5, fy=0.5), MODEL, more_tables=more)
 
                 # Transform coordinates
                 warped = transform_normalize_sort(res, mat, w, h)
