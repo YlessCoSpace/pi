@@ -124,9 +124,11 @@ def iou(box1, box2):
 
     return inter_area / union_area if union_area != 0 else 0
 
+
 def area(box):
     x1, y1, x2, y2 = box
     return abs((x2 - x1) * (y2 - y1))
+
 
 def coverage(box1, box2):
     x1, y1, x2, y2 = box1
@@ -203,14 +205,26 @@ def clamp_normalize(tup):
 def scale_tup(tup, scale_x, scale_y):
     return tup[0] * scale_x, tup[1] * scale_y
 
+
 def offset_tup(tup, offset_x, offset_y):
     return tup[0] + offset_x, tup[1] + offset_y
+
 
 def add_tup(tup1, tup2):
     return tup1[0] + tup2[0], tup1[1] + tup2[1]
 
+
 def p_center(tl, tr, bl, br):
     return line_intersection(tl, br, bl, tr)
+
+
+def p_bottom(tl, tr, bl, br):
+    return scale_tup(add_tup(bl, br), 0.5, 0.5)
+
+
+def p_top(tl, tr, bl, br):
+    return scale_tup(add_tup(tl, tr), 0.5, 0.5)
+
 
 __all__ = [
     'save_obj',
@@ -236,5 +250,7 @@ __all__ = [
     'offset_tup',
     'add_tup',
     'p_center',
+    'p_bottom',
+    'p_top',
     'area'
 ]

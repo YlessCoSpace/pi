@@ -268,8 +268,8 @@ def make_payload(data: dict[int, TableEntry], max_x=10.0, max_y=10.0, offset=2.5
 
 REALTIME = True
 stopped = False
-cap = cv2.VideoCapture('videos/case_2.mov')
-target_fps = 2
+cap = find_network_cam(username='admin', password='admin')
+target_fps = 1
 target_fps = math.floor(target_fps)
 frame_interval = int(cap.get(cv2.CAP_PROP_FPS)) // target_fps
 

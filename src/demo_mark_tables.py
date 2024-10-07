@@ -3,7 +3,7 @@ import time
 
 import cv2
 import argparse
-from lib_find_network_cam import find_network_cam
+from lib_network import *
 from lib_transform import *
 
 COLORS = [(0, 0, 255), (0, 255, 0), (255, 0, 0), (0, 255, 255), (255, 0, 255)]
@@ -39,7 +39,7 @@ def cb_click(_event, _x, _y, _flags, _param):
     cv2.imshow('Image', frame)
 
 
-cap = cv2.VideoCapture('videos/IMG_4174.MOV')
+cap = cv2.VideoCapture('videos/case_2.mov')
 target_fps = 10
 target_fps = math.floor(target_fps)
 frame_interval = int(cap.get(cv2.CAP_PROP_FPS)) // target_fps

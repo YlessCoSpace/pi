@@ -17,6 +17,7 @@ ITEM_CLASSES = [
 PERSON_CLASS = 0
 TABLE_CLASS = 60
 COLORS = [(0, 0, 255), (0, 255, 0), (255, 0, 0), (0, 255, 255), (255, 0, 255)]
+BORDER_EPSILON = 0.05
 
 
 def two_stage_det(image, model: YOLO, more_tables: list[EntityEntry] | None = None) -> dict[str, list[EntityEntry]]:
@@ -31,17 +32,24 @@ def two_stage_det(image, model: YOLO, more_tables: list[EntityEntry] | None = No
 
                 if cls_name not in __ret:
                     __ret[cls_name] = []
-                __ret[cls_name].append({
-                    'pos1': (x1 / _w, y1 / _h),
-                    'pos2': (x2 / _w, y2 / _h),
-                    'conf': conf
-                })
+
+                _p1 = scale_tup((x1, y1), 1 / _w, 1 / _h)
+                _p2 = scale_tup((x2, y2), 1 / _w, 1 / _h)
+                _cen = scale_tup(add_tup(_p1, _p2), 0.5, 0.5)
+
+                if (BORDER_EPSILON <= _cen[0] <= (1 - BORDER_EPSILON) and
+                        BORDER_EPSILON <= _cen[1] <= (1 - BORDER_EPSILON)):
+                    __ret[cls_name].append({
+                        'pos1': _p1,
+                        'pos2': _p2,
+                        'conf': conf
+                    })
         return __ret
 
     _h, _w = image.shape[:2]
     _results = [model.predict(image, classes=[PERSON_CLASS], conf=0.25)[0],
-                model.predict(image, classes=[TABLE_CLASS], conf=0.05)[0],
-                model.predict(image, classes=ITEM_CLASSES, conf=0.1)[0]]
+                model.predict(image, classes=[TABLE_CLASS], conf=0.25)[0],
+                model.predict(image, classes=ITEM_CLASSES, conf=0.2)[0]]
 
     _ret = _to_result(_results)
 
@@ -81,7 +89,7 @@ def two_stage_det(image, model: YOLO, more_tables: list[EntityEntry] | None = No
 
     # Filter out small BBs
     for _c in _out:
-        _out[_c] = list(filter(lambda x: area((*x['pos1'], *x['pos2'])) >= 0.01 * 0.01, _out[_c]))
+        _out[_c] = list(filter(lambda x: area((*x['pos1'], *x['pos2'])) >= 0.005 * 0.005, _out[_c]))
 
     return _out
 
@@ -201,7 +209,7 @@ def assign_to_table(data: dict[str, list[EntityTransformed]]) -> dict[int, Table
 
     # Compare center bottom of people vs table
     for index_person, person in enumerate(_people):
-        p1 = p_center(**person['real'])
+        p1 = p_bottom(**person['real'])
         min_dist = float('inf')
         min_idx = None
         for index, p_table in enumerate(table_pos):
@@ -217,7 +225,7 @@ def assign_to_table(data: dict[str, list[EntityTransformed]]) -> dict[int, Table
             except OverflowError:
                 pass
     for index_item, item in enumerate(_items):
-        p1 = p_center(**item['real'])
+        p1 = p_bottom(**item['real'])
         min_dist = float('inf')
         min_idx = None
         for index, p_table in enumerate(table_pos):
@@ -236,22 +244,22 @@ def assign_to_table(data: dict[str, list[EntityTransformed]]) -> dict[int, Table
     return _out
 
 
-def make_payload(data: dict[int, TableEntry], max_x=13.5, max_y=11.5) -> str:
+def make_payload(data: dict[int, TableEntry], max_x=10.0, max_y=10.0, offset=2.5) -> str:
     return json.dumps(
         {
             'tables': [
                 {
                     'id': k,
-                    'x': v['x'],
-                    'y': v['y'],
+                    'x': v['x'] * max_x + offset,
+                    'y': v['y'] * max_y + offset,
                     'people': len(v['people']),
                     'item': bool(len(v['items'])),
                     'time': 0,
                     'startTime': 0
                 } for k, v in data.items()
             ],
-            'max_x': max_x,
-            'max_y': max_y
+            'max_x': max_x + 2 * offset,
+            'max_y': max_y + 2 * offset
         }
     )
 

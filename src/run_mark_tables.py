@@ -3,7 +3,7 @@ import time
 
 import cv2
 import argparse
-from lib_find_network_cam import find_network_cam
+from lib_network import *
 from lib_transform import *
 
 COLORS = [(0, 0, 255), (0, 255, 0), (255, 0, 0), (0, 255, 255), (255, 0, 255)]

@@ -1,7 +1,7 @@
 import math
 
 import cv2
-from lib_find_network_cam import find_network_cam
+from lib_network import *
 from lib_transform import *
 
 points = []
