@@ -317,7 +317,7 @@ if __name__ == '__main__':
 
         # Construct outgoing payload
         payload = make_payload(assigned)
-        # pub.publish('seatmap', payload)
+        pub.publish('seatmap', payload)
 
         # Draw input frame overlays
         for i, c in enumerate(res):

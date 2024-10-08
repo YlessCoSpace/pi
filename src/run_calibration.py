@@ -59,7 +59,7 @@ def cb_click(_event, _x, _y, _flags, _param):
 
 
 cap = find_network_cam(username='admin', password='admin')
-target_fps = 1
+target_fps = 30
 q = queue.Queue()
 stopped = threading.Event()
 
@@ -85,6 +85,8 @@ def receive():
 
 
 def display():
+    out_video = cv2.VideoWriter('videos/out_cal.mp4', cv2.VideoWriter_fourcc(*'mp4v'), 30.0, (1920, 1080))
+
     cv2.namedWindow('Image')
     cv2.setWindowProperty('Image', cv2.WND_PROP_FULLSCREEN, cv2.WINDOW_FULLSCREEN)
     cv2.setMouseCallback('Image', cb_click)
@@ -96,6 +98,7 @@ def display():
                 fr = q.get(timeout=1)
                 draw_overlays(fr)
                 cv2.imshow("Image", fr)
+                out_video.write(fr)
         except queue.Empty:
             pass
 
@@ -103,6 +106,12 @@ def display():
             stopped.set()
             break
 
+    draw_overlays(fr)
+    for i in range(60):
+        out_video.write(fr)
+
+    print('Saving...')
+    out_video.release()
     cv2.destroyAllWindows()
 
 

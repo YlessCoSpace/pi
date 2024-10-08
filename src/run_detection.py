@@ -268,7 +268,7 @@ def make_payload(data: dict[int, TableEntry], max_x=10.0, max_y=10.0, offset=2.5
 
 REALTIME = True
 cap = find_network_cam(username='admin', password='admin')
-target_fps = 0.5
+target_fps = 30
 q_input = queue.Queue()
 q_output = queue.Queue()
 
@@ -394,6 +394,8 @@ def process():
 
 
 def display():
+    out_video = cv2.VideoWriter('videos/out_det.mp4', cv2.VideoWriter_fourcc(*'mp4v'), 30.0, (1920, 1080))
+
     cv2.namedWindow('Image')
     cv2.setWindowProperty('Image', cv2.WND_PROP_FULLSCREEN, cv2.WINDOW_FULLSCREEN)
     print("Started displaying")
@@ -403,6 +405,7 @@ def display():
             if not q_output.empty():
                 fr = q_output.get(timeout=1)
                 cv2.imshow("Image", fr)
+                out_video.write(fr)
         except queue.Empty:
             pass
 
@@ -410,6 +413,10 @@ def display():
             stopped.set()
             break
 
+    for i in range(60):
+        out_video.write(fr)
+
+    print('Saving...')
     cv2.destroyAllWindows()
 
 

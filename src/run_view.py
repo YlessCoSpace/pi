@@ -6,7 +6,7 @@ import cv2
 from lib_network import *
 
 cap = find_network_cam(username='admin', password='admin')
-target_fps = 1
+target_fps = 30
 q = queue.Queue()
 stopped = threading.Event()
 
